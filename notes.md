@@ -946,3 +946,167 @@ Value mein sirf string nahi — poora JSON object bhi rakh sakte ho!
 ---
 
 *Next Video: Product API with Redis caching — DB + Redis integration! 🚀*
+
+# Redis - User Profile Caching: Hash vs JSON 🗂️
+
+> **Topic:** Redis mein User Profile store karna — JSON String vs Hash  
+> **Playlist:** Chai aur Redis  
+> **Level:** Intermediate
+
+---
+
+## 📌 Ye Video Kya Cover Karta Hai?
+
+Is video mein **do tarike** bataye gaye hain Redis mein data store karne ke:
+
+1. **`SET` command** → Simple JSON string store karna
+2. **`HSET` command** → Hash (Object) ke form mein store karna
+
+Interview mein yahi distinguish karta hai ki tumne **practically Redis use kiya hai ya sirf padha hai.**
+
+---
+
+## 🔑 Core Concept: Redis mein Data Rakhne ke 2 Tarike
+
+### 1️⃣ SET Command (JSON String approach)
+
+```
+Store karta hai: Single Variable / String
+```
+
+- Sabse **basic aur default** method
+- Poori value ek **string ke roop mein** store hoti hai
+- Update karne ke liye **poori string replace** karni padti hai (partial update possible nahi)
+- Data retrieve karte waqt **`JSON.parse()`** karna padta hai
+
+#### Code Example:
+
+```js
+// POST - Data save karna (JSON String)
+app.post('/user/:id/json', async (req, res) => {
+  const key = `user:${req.params.id}:json`;
+  await redis.set(key, JSON.stringify(req.body)); // string mein convert karna padta hai
+  res.json({ status: "saved as json" });
+});
+
+// GET - Data retrieve karna
+app.get('/user/:id/json', async (req, res) => {
+  const key = `user:${req.params.id}:json`;
+  const raw = await redis.get(key);
+  res.json({ user: raw ? JSON.parse(raw) : null }); // parse karna padta hai wapas
+});
+```
+
+**⚠️ Problem:** DB mein poora data ek string hai. Edit/update karna ho toh **naya object dalna padta hai** — DSA skills lagane ki koi zaroorat nahi aur sense bhi nahi.
+
+---
+
+### 2️⃣ HSET Command (Hash approach)
+
+```
+Store karta hai: Object (key-value pairs)
+```
+
+- Data **ek structured object** ki tarah store hota hai
+- **Single field update** possible hai — poora object replace nahi karna padta
+- Data retrieve karte waqt **`JSON.parse()` ki zaroorat nahi**
+- Production mein yahi **zyada use hota hai** user profiles ke liye
+
+#### Code Example:
+
+```js
+// POST - Data save karna (Hash)
+app.post('/user/:id/hash', async (req, res) => {
+  const key = `user:${req.params.id}:hash`;
+  await redis.hset(key, req.body); // directly object de do, stringify nahi
+  res.json({ status: "saved as hash" });
+});
+
+// GET - Data retrieve karna
+app.get('/user/:id/hash', async (req, res) => {
+  const key = `user:${req.params.id}:hash`;
+  const user = await redis.hgetall(key); // poora object ek baar mein
+  res.json({ user });
+});
+```
+
+**✅ Advantage:** Directly object milta hai. No parsing needed. Clean code!
+
+---
+
+## 🛠️ Important Redis Hash Commands (HSET family)
+
+| Command | Kaam kya karta hai |
+|---|---|
+| `HSET key field value` | Ek ya zyada fields set karo |
+| `HGET key field` | **Single field** ki value lo |
+| `HGETALL key` | **Poora object** lo (most used ✅) |
+| `HDEL key field` | Specific field delete karo |
+| `HEXISTS key field` | Check karo ki field exist karti hai ya nahi |
+
+> 💡 **Interview Tip:** `HGETALL` sabse zyada use hota hai kyunki Redis mein itna zyada data hota nahi. Mostly poora object hi chahiye hota hai.
+
+---
+
+## ⚔️ JSON String vs Hash — Quick Comparison
+
+| Feature | SET (JSON String) | HSET (Hash) |
+|---|---|---|
+| Storage format | String | Object (key-value) |
+| Partial update | ❌ Nahi | ✅ Haan |
+| Parse required? | ✅ Haan (`JSON.parse`) | ❌ Nahi |
+| Memory efficiency | Thoda zyada | Better |
+| Production use | Basic caching | User profiles, sessions ✅ |
+| Increment/Decrement fields | ❌ | ✅ (e.g., like count) |
+
+---
+
+## 🏗️ Project Setup (Boilerplate)
+
+```js
+import express from 'express';
+import Redis from 'ioredis';
+
+const app = express();
+app.use(express.json());
+
+const redis = new Redis(); // localhost default ya process.env se
+
+// ... routes yahan aate hain
+
+app.listen(3000, () => {
+  console.log('Server is running on http://localhost:3000');
+});
+```
+
+**Tech Stack used:**
+- `express` — HTTP server
+- `ioredis` — Redis client for Node.js
+- `Docker` — Redis locally run karne ke liye
+
+---
+
+## 🎯 Key Takeaways (Interview ke liye yaad rakho)
+
+1. **`SET` vs `HSET`** ka difference pata hona chahiye — yahi interview mein pakadta hai
+2. `HSET` use karo jab **object/structured data** store karna ho
+3. `HGETALL` use karo jab **poora object** chahiye ho (90% cases mein yehi)
+4. `SET` mein update = **complete replace** | `HSET` mein update = **partial possible**
+5. Hash mein **individual fields increment/decrement** bhi kar sakte ho (like counts, view counts, etc.)
+6. Redis complex nahi hai — bas ek **thoda sa darr** baitha hota hai, nikaal do usse
+
+---
+
+## 📂 Folder Structure (Is Project Ki)
+
+```
+05-project/
+├── package.json
+└── src/
+    └── index.js
+```
+
+---
+
+> **Next Video:** Agle concepts ke liye playlist follow karo 🚀  
+> **Practice:** Khud ye endpoints Postman/Thunder Client mein test karo — tabhi concept permanently embed hoga!
