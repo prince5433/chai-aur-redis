@@ -711,3 +711,238 @@ Flow:
 ---
 
 *Next Video: Product API banana with Redis caching — aur interesting project! 🚀*
+
+# 🔴 Redis — TTL (Time To Live) + OTP Project (Hinglish)
+> *Chai aur Code series — Video 4: Login with OTP using TTL*
+
+---
+
+## 🎯 Is Video Ka Goal
+
+Redis ki **superpower — TTL (Time To Live)** — samajhna aur use karna.
+
+**Project:** OTP-based Login — Redis se OTP store, verify, aur auto-expire karna.
+
+---
+
+## ⏳ TTL Kya Hai? — Redis Ka Superpower
+
+> *"Koi bhi key aap Redis mein set karo — wo kitni der tak rahegi?"*
+
+```
+t = 0 sec   →  OTP set kiya (TTL = 30 sec)
+t = 20 sec  →  TTL bacha = 10 sec
+t = 30 sec  →  KEY AUTO-DELETE ✅ (expired)
+t = 31 sec  →  redis.get() → null, redis.ttl() → -2
+```
+
+**-2 ka matlab:** Key exist nahi karti (expire ho gayi ya kabhi thi hi nahi)  
+**-1 ka matlab:** Key exist karti hai lekin **koi TTL set nahi** hai
+
+---
+
+## 🔑 Dynamic Key Generation — Helper Function
+
+Jab key **dynamic** ho (user-specific), tab constant ki jagah **helper function** banate hain:
+
+```js
+// Static key (constants file mein)
+const BANNER_KEY = 'app:banner'
+
+// Dynamic key (helper function se)
+const getOtpKey = (phone) => `otp:${phone}`
+// Example: getOtpKey('9898989898') → "otp:9898989898"
+```
+
+**Kyun function?**
+- Reliability — har jagah same format guarantee
+- Reusability — import karo, call karo
+- Corporate standard — production code mein yahi hota hai
+
+---
+
+## 💻 Code — `src/index.js`
+
+```js
+import express from 'express'
+import Redis from 'ioredis'
+
+const app = express()
+app.use(express.json())
+
+const redis = new Redis(
+  process.env.REDIS_URL || 'redis://localhost:6379'
+)
+
+// Helper: dynamic key generator
+const getOtpKey = (phone) => `otp:${phone}`
+
+// 1. POST /otp — OTP generate karke Redis mein store karo
+app.post('/otp', async (req, res) => {
+  const { phone } = req.body
+  const otp = Math.floor(1000 + Math.random() * 9000)  // 4-digit OTP
+
+  await redis.set(
+    getOtpKey(phone),   // key: "otp:9898989898"
+    otp,                // value: 4321
+    'EX',               // EX = seconds mein expire
+    30                  // 30 seconds TTL
+  )
+
+  // Production mein: SMS service se bhejo (Twilio, MSG91, etc.)
+  res.json({ otp })  // Demo ke liye direct bhej rahe hain
+})
+
+// 2. POST /otp/verify — OTP verify karo
+app.post('/otp/verify', async (req, res) => {
+  const { phone, otp } = req.body
+  const savedOtp = await redis.get(getOtpKey(phone))
+
+  if (!savedOtp) {
+    return res.status(400).json({ message: 'OTP expired or not found' })
+  }
+
+  if (savedOtp !== String(otp)) {
+    return res.status(400).json({ message: 'Invalid OTP' })
+  }
+
+  // OTP match! Delete from Redis (ek baar use ho gaya)
+  await redis.del(getOtpKey(phone))
+
+  // Yahan: DB mein user verify mark karo, session banao, JWT bhejo
+  res.json({ message: 'OTP verified successfully' })
+})
+
+// 3. GET /otp/:phone/ttl — TTL check karo
+app.get('/otp/:phone/ttl', async (req, res) => {
+  const ttl = await redis.ttl(getOtpKey(req.params.phone))
+  res.json({ ttl })
+})
+
+app.listen(3000, () => console.log('Server: http://localhost:3000'))
+```
+
+---
+
+## 🔥 `redis.set()` with TTL — Syntax
+
+```js
+// Bina TTL ke (permanent)
+await redis.set('key', 'value')
+
+// TTL ke saath — EX = seconds
+await redis.set('key', 'value', 'EX', 30)
+
+// TTL ke saath — PX = milliseconds
+await redis.set('key', 'value', 'PX', 30000)
+```
+
+**Internally kaise store hota hai:**
+
+```
+Key:   "otp:9898989898"
+Value: "4321"
+Meta:  expiry = <timestamp + 30sec>   ← yahi TTL hai
+```
+
+> Value aur TTL alag-alag store hote hain. `redis.get()` sirf value deta hai, `redis.ttl()` sirf time bacha hua.
+
+---
+
+## 🧪 `redis.ttl()` — Time Remaining Check
+
+```js
+const ttl = await redis.ttl('otp:9898989898')
+// Returns:
+//  25   → 25 seconds baaki hain
+//   0   → abhi expire hoga
+//  -1   → key hai but TTL set nahi
+//  -2   → key exist nahi karti (expire ho gayi)
+```
+
+**Use case:** Frontend ko countdown timer dikhana, ya validate karna ki OTP abhi valid hai.
+
+---
+
+## 🏭 Production-Grade OTP Data (Advanced)
+
+Simple OTP ke alawa, real production mein ye bhi store karte hain:
+
+```js
+// Complex value — JSON stringify karke rakho
+const otpData = {
+  otp: 4321,
+  attempts: 0,          // kitni baar galat daala
+  maxAttempts: 3,       // 3 se zyada galat → block
+  createdAt: Date.now(),        // debugging ke liye
+  lastAttemptedAt: null,        // brute-force check
+  blockUntil: null              // rate limiting
+}
+
+await redis.set(getOtpKey(phone), JSON.stringify(otpData), 'EX', 300)
+
+// Get karte waqt parse karo
+const raw = await redis.get(getOtpKey(phone))
+const data = JSON.parse(raw)
+```
+
+> Yahi hai Redis mein "value" ki asli power — sirf ek string nahi, poora JSON object rakh sakte ho!
+
+---
+
+## 🔄 OTP Flow — Complete
+
+```
+USER                    BACKEND                 REDIS
+ |                          |                     |
+ |-- POST /otp {phone} ---> |                     |
+ |                          |-- SET otp:phone ---> |
+ |                          |   value=4321         |
+ |                          |   EX=30              |
+ |<-- { otp: 4321 } -----  |                     |
+ |   (SMS mein aata)        |                     |
+ |                          |                     |
+ |-- POST /otp/verify ----> |                     |
+ |   {phone, otp: 4321}     |-- GET otp:phone ---> |
+ |                          |<-- "4321" ---------- |
+ |                          |-- DEL otp:phone ---> |
+ |<-- "OTP verified" ------ |                     |
+```
+
+---
+
+## 📝 Quick Revision
+
+```
+TTL set karna:
+  redis.set(key, value, 'EX', seconds)
+
+TTL check karna:
+  redis.ttl(key)
+  → positive = seconds baaki
+  → -1 = no TTL
+  → -2 = key nahi hai
+
+OTP Pattern:
+  Key   = otp:<phone>          (dynamic, helper function se)
+  Value = otp number
+  TTL   = 30-300 seconds
+
+Verify ke baad:
+  redis.del(key) karo — ek baar use hone ke baad hatao
+
+Value mein sirf string nahi — poora JSON object bhi rakh sakte ho!
+```
+
+---
+
+## 🧠 Key Naming — Static vs Dynamic
+
+| Situation | Approach | Example |
+|---|---|---|
+| Fixed key (ek hi hoga) | Constant | `const BANNER_KEY = 'app:banner'` |
+| User-specific key | Helper function | `getOtpKey(phone)` → `'otp:9898989898'` |
+
+---
+
+*Next Video: Product API with Redis caching — DB + Redis integration! 🚀*
