@@ -15,6 +15,11 @@ const redis = new Redis(
   process.env.REDIS_URL || 'redis://localhost:6379'
 );
 
+// Redis connection error event listener to catch and print ECONNRESET errors gracefully
+redis.on('error', (err) => {
+  console.warn('Redis connection issue:', err.message);
+});
+
 // Helper function: Dynamic keys generate karne ke liye taaki uniform pattern rahe, like "otp:9898989898"
 function getOtpKey(phone) { 
   return `otp:${phone}`; 

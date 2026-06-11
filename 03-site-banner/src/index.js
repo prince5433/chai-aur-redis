@@ -15,6 +15,11 @@ const redis = new Redis(
   process.env.REDIS_URL || 'redis://localhost:6379'
 );
 
+// Redis connection error event listener to catch and print ECONNRESET errors gracefully
+redis.on('error', (err) => {
+  console.warn('Redis connection issue:', err.message);
+});
+
 // Redis Key Constant: Taaki har jagah consistency bani rahe aur typos se bacha jaa sake
 const BANNER_KEY = 'app:banner';
 
