@@ -12,7 +12,7 @@ app.use(express.json());
 
 // Redis Server se connect karne ke liye new instance banaya
 const redis = new Redis(
-  process.env.REDIS_URL || 'redis://localhost:6379'
+  process.env.REDIS_URL || 'redis://127.0.0.1:6379'
 );
 
 // Redis connection error event listener to catch and print ECONNRESET errors gracefully

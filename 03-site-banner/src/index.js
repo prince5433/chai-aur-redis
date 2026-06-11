@@ -12,7 +12,7 @@ app.use(express.json());
 
 // Redis Client initialization. Agar environment variable mein custom URL ho toh use use karega, warna defaults to localhost:6379
 const redis = new Redis(
-  process.env.REDIS_URL || 'redis://localhost:6379'
+  process.env.REDIS_URL || 'redis://127.0.0.1:6379'
 );
 
 // Redis connection error event listener to catch and print ECONNRESET errors gracefully

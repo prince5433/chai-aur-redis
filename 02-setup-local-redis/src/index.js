@@ -17,7 +17,7 @@ const PORT = 3000;
 mongoose.connect("mongodb://localhost:27017/redis-project");
 
 // Redis client ko initialize kiya. Agar environment variable REDIS_URL present hai toh use use karega, nahi toh default localhost:6379 se connect karega
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379');
 
 // Redis connection error event listener to catch and print ECONNRESET errors gracefully
 redis.on('error', (err) => {
