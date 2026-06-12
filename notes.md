@@ -1110,3 +1110,1025 @@ app.listen(3000, () => {
 
 > **Next Video:** Agle concepts ke liye playlist follow karo 🚀  
 > **Practice:** Khud ye endpoints Postman/Thunder Client mein test karo — tabhi concept permanently embed hoga!
+
+# 🔴 Redis — Queue System (LPUSH / RPOP) (Hinglish)
+> *Chai aur Code series — Video 6: Redis as a Job Queue*
+
+---
+
+## 🎯 Is Video Ka Goal
+
+Redis ko **Queue (Q) ki tarah use karna** — raw implementation karna aur uske drawbacks samajhna.
+
+> 💡 Libraries baad mein aayengi. Pehle raw code likho — tabhi pata chalega ki library kyun zaroori hai.
+
+---
+
+## 📋 Queue Kya Hoti Hai? — Concept
+
+```
+LPUSH (left se daalo)          RPOP (right se nikalo)
+
+  [C] → [B] → [A]
+   ↑                    ↑
+ naya                 pehle wala
+ aaya                 process hoga
+
+FIFO: First In, First Out
+```
+
+**Rule yaad rakho:**
+- **Left se PUSH** karo → `lpush`
+- **Right se POP** karo → `rpop`
+
+Dono taraf se ho sakta hai, lekin **ek standard follow karo** — warna confusion.
+
+---
+
+## 🏗️ Job Queue Architecture
+
+```
+POST /emails  →  Job banao  →  LPUSH queue:email
+                                     ↓
+GET /emails/process  →  RPOP queue:email  →  Email bhejo
+```
+
+**Job kya hoti hai?**
+Queue ke andar jo bhi entity daali jaati hai — email, video processing task, report generation — use **"Job"** bolte hain.
+
+---
+
+## 💻 Code — `src/index.js`
+
+```js
+import express from 'express'
+import Redis from 'ioredis'
+
+const app = express()
+app.use(express.json())
+
+const redis = new Redis(
+  process.env.REDIS_URL || 'redis://localhost:6379'
+)
+
+// Queue ka naam — standard practice: queue:purpose
+const Q_NAME = 'queue:email'
+
+// POST /emails — job queue mein daalo
+app.post('/emails', async (req, res) => {
+  const job = {
+    to: req.body.to,
+    subject: req.body.subject || 'No Subject',
+    body: req.body.body,
+    createdAt: new Date().toISOString()   // standard: hamesha timestamp rakho
+  }
+
+  await redis.lpush(Q_NAME, JSON.stringify(job))  // LEFT se push
+  res.json({ queued: true, job })
+})
+
+// GET /emails/process — ek job uthao aur process karo
+app.get('/emails/process', async (req, res) => {
+  const rawJob = await redis.rpop(Q_NAME)   // RIGHT se pop
+
+  if (!rawJob) {
+    return res.json({ message: 'Queue is empty' })
+  }
+
+  const job = JSON.parse(rawJob)
+
+  // Yahan actual email sending hoti (Twilio SendGrid, Nodemailer, etc.)
+  // Simulate kar rahe hain abhi
+  console.log('Sending email to:', job.to)
+
+  res.json({ message: 'Email sent', job })
+})
+
+app.listen(3000, () => console.log('Server: http://localhost:3000'))
+```
+
+---
+
+## 🔑 Queue Commands
+
+| Command | Kaam | Example |
+|---|---|---|
+| `lpush(key, value)` | Left se daalo | `redis.lpush('queue:email', JSON.stringify(job))` |
+| `rpop(key)` | Right se nikalo (process karo) | `redis.rpop('queue:email')` |
+| `rpush(key, value)` | Right se daalo | Alternative |
+| `lpop(key)` | Left se nikalo | Alternative |
+
+> 💡 **LPUSH + RPOP** = standard FIFO queue  
+> **RPUSH + LPOP** = bhi valid hai — bas ek consistent rule follow karo
+
+---
+
+## 🗝️ Queue Key Naming
+
+```js
+// Standard practice
+const Q_NAME = 'queue:email'
+
+// Aur examples
+'queue:notifications'
+'queue:video-processing'
+'queue:reports'
+```
+
+---
+
+## 🧪 API Test
+
+```
+# Job queue mein daalo
+POST /emails
+Body: {
+  "to": "hitesh@hitesh.ai",
+  "subject": "Chai aur Redis",
+  "body": "Welcome to the playlist"
+}
+→ { "queued": true, "job": {...} }
+
+# Job uthao aur process karo
+GET /emails/process
+→ { "message": "Email sent", "job": {...} }
+
+# Agar queue empty hai
+GET /emails/process
+→ { "message": "Queue is empty" }
+```
+
+---
+
+## ⚠️ Raw Redis Queue ke Drawbacks
+
+Yahi video ka sabse important part hai. Raw implementation mein **3 bade problems** hain:
+
+### 1. 🔴 Job Loss
+
+```
+Worker → RPOP kiya → job gone from Redis
+Worker → CRASH ho gaya → email nahi gayi
+Job hamesha ke liye lost ❌
+```
+
+RPOP karte hi job Redis se hat jaati hai — agar worker fail ho jaaye to **job dobara process nahi hogi.**
+
+---
+
+### 2. 🔴 No Retry Mechanism
+
+```
+Email fail hui → koi retry nahi
+3 baar try karo → koi system nahi
+Dead letter queue → exist nahi karti
+```
+
+Agar job fail ho jaaye — **dobara try karne ka koi mechanism nahi** raw Redis queue mein.
+
+---
+
+### 3. 🔴 No Parallel Workers
+
+```
+10,000 emails pending → sirf ek worker
+Manual trigger → koi background processing nahi
+```
+
+Hamare system mein worker ko manually endpoint hit karke trigger karna padta hai. **Background mein automatically process karne ka koi system nahi.**
+
+---
+
+## 📊 Summary — When to Use Raw vs Library
+
+| Feature | Raw Redis Queue | BullMQ / Bull (library) |
+|---|---|---|
+| Job Loss | ❌ Possible | ✅ Protected |
+| Retry | ❌ Nahi | ✅ Auto retry |
+| Parallel Workers | ❌ Manual | ✅ Built-in |
+| Dead Letter Queue | ❌ Nahi | ✅ Available |
+| Complexity | Low | Medium |
+
+> Raw Redis queue tab use karo jab:
+> - Simple tasks hain
+> - Job loss acceptable hai
+> - Production-grade reliability nahi chahiye
+
+---
+
+## 📝 Quick Revision
+
+```
+Queue Rule:
+  LPUSH → left se daalo (new job)
+  RPOP  → right se nikalo (process karo)
+  = FIFO order maintain hota hai
+
+Job = queue ke andar ek task/entity
+Key = 'queue:purpose'  (standard naming)
+
+JSON.stringify() → lpush karte waqt
+JSON.parse()     → rpop ke baad
+
+3 Drawbacks:
+  1. Job loss (rpop ke baad crash)
+  2. No retry mechanism
+  3. No parallel/background workers
+```
+
+---
+
+## 🎯 Assignment
+
+Comment mein batao:
+- Kya `rpush` bhi hota hai? Kya `lpop` bhi hota hai?
+- Kya dusre tarike se bhi queue implement ho sakti hai? Kaise?
+
+---
+
+*Next Video: BullMQ — proper job queue library with retries, parallel workers, and more! 🚀*
+
+# 🔴 Redis — BullMQ: Production-Grade Job Queue (Hinglish)
+> *Chai aur Code series — Video 7: BullMQ Queue Infrastructure*
+
+---
+
+## 🎯 Is Video Ka Goal
+
+Raw Redis queue ke drawbacks solve karna — **BullMQ** use karke production-grade queuing system banana.
+
+> 💡 BullMQ ek open-source message queue hai jo **Redis ko backend** ki tarah use karta hai. ~1 decade se industry mein battle-tested hai.
+
+---
+
+## 🏗️ Queue Architecture — Producer/Consumer
+
+```
+PRODUCER(s)          MESSAGE QUEUE          CONSUMER(s) / WORKERS
+(API server)    →   [Job1][Job2][Job3]   →   Worker1
+                                         →   Worker2
+                                         →   Worker3
+```
+
+| Term | Matlab |
+|---|---|
+| Producer | Jo queue mein job daalta hai (usually API server) |
+| Consumer / Worker | Jo queue se job uthata hai aur process karta hai |
+| Job | Queue ke andar ek task (email, video process, report) |
+| Queue | Jobs ka waiting area — Redis pe backed |
+
+> **Important:** Queue mein **heavy data nahi rakha jaata**. Sirf task ki detail/ID rakho. Actual data S3 ya DB mein hoga — worker wahan se uthayega.
+
+---
+
+## 📦 Packages
+
+```bash
+bun install express bullmq ioredis
+```
+
+---
+
+## 📁 File Structure
+
+```
+src/
+├── q.js        ← Queue + Redis connection define karo
+├── worker.js   ← Consumer logic — job process karo
+└── api.js      ← Producer — job queue mein daalo
+```
+
+---
+
+## 💻 `q.js` — Queue Setup
+
+```js
+import { Queue } from 'bullmq'
+
+// Redis connection (BullMQ ko dena padta hai)
+const connection = {
+  host: 'localhost',
+  port: 6379
+}
+
+// Queue banao — sirf naam aur connection chahiye
+const emailQueue = new Queue('emails', { connection })
+
+export { emailQueue, connection }
+```
+
+**Kitni bhi queues bana sakte ho:**
+```js
+const emailQueue   = new Queue('emails',    { connection })
+const orderQueue   = new Queue('orders',    { connection })
+const paymentQueue = new Queue('payments',  { connection })
+```
+
+---
+
+## 💻 `worker.js` — Consumer
+
+```js
+import { Worker } from 'bullmq'
+import { connection } from './q.js'
+
+const worker = new Worker(
+  'emails',           // 1. Kaun si queue monitor karni hai
+
+  async (job) => {    // 2. Business logic (job mile to kya karo)
+    console.log('Processing email job:', job.id, job.name)
+    console.log('Job data:', job.data)
+
+    // Simulate email sending
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+
+    console.log('Email job complete!')
+  },
+
+  { connection }      // 3. Redis connection
+)
+
+// Event listeners — minimum yahi 2 lagao hamesha
+worker.on('completed', (job) => {
+  console.log(`Job ${job.id} completed`)
+})
+
+worker.on('failed', (job, err) => {
+  console.log(`Job ${job.id} failed:`, err)
+})
+```
+
+**3 cheezein sirf chahiye Worker ko:**
+1. Queue ka naam
+2. Async callback (business logic)
+3. Redis connection
+
+---
+
+## 💻 `api.js` — Producer
+
+```js
+import express from 'express'
+import { emailQueue } from './q.js'
+
+const app = express()
+app.use(express.json())
+
+// POST /welcome-email — job queue mein daalo
+app.post('/welcome-email', async (req, res) => {
+  const job = await emailQueue.add(
+    'send-welcome-email',     // job ka naam (no spaces — use hyphens)
+
+    {                         // job data (worker ko milega job.data se)
+      to: req.body.to,
+      name: req.body.name || 'Learner'
+    },
+
+    {                         // configuration
+      attempts: 3,            // fail hone pe 3 baar try karo
+      backoff: {
+        type: 'exponential',  // 1s, 2s, 4s... badhte delay ke saath retry
+        delay: 1000
+      }
+    }
+  )
+
+  res.json({ emailAdded: true, jobId: job.id })
+})
+
+app.listen(3000, () => console.log('Server: http://localhost:3000'))
+```
+
+---
+
+## 🔑 `emailQueue.add()` — 3 Parameters
+
+```js
+emailQueue.add(
+  'job-name',    // 1. Job naam — hyphen use karo spaces ki jagah
+  { data },      // 2. Job data — worker ko job.data se milega
+  { config }     // 3. Config — attempts, backoff, delay etc.
+)
+```
+
+---
+
+## ⚙️ Job Configuration Options
+
+| Option | Kaam | Example |
+|---|---|---|
+| `attempts` | Fail hone pe kitni baar retry | `attempts: 3` |
+| `backoff.type` | Retry strategy | `'exponential'` ya `'fixed'` |
+| `backoff.delay` | Base delay (ms) | `delay: 1000` |
+| `delay` | Job ko immediately nahi, delay ke baad run karo | `delay: 5000` |
+| `removeOnComplete` | Complete hone ke baad queue se hatao | `true` |
+| `removeOnFail` | Fail hone ke baad queue se hatao | `false` |
+
+---
+
+## 🔄 BullMQ Flow
+
+```
+POST /welcome-email
+        |
+        ↓
+emailQueue.add(name, data, config)
+        |
+        ↓
+   [REDIS QUEUE]
+   job1, job2, job3...
+        |
+        ↓ (worker constantly monitors)
+   Worker picks up job
+        |
+        ↓
+   Business logic execute
+        |
+        ├── SUCCESS → 'completed' event fire
+        └── FAIL → retry (if attempts remaining)
+                    → 'failed' event fire (if all attempts exhausted)
+```
+
+---
+
+## ✅ BullMQ ne Raw Queue ke Problems Solve Kiye
+
+| Problem (Raw Redis) | Solution (BullMQ) |
+|---|---|
+| Job loss (RPOP ke baad crash) | ✅ Job tab tak queue mein rehti hai jab tak complete na ho |
+| No retry | ✅ `attempts` config se auto-retry |
+| No parallel workers | ✅ Multiple workers easily — no duplicate processing |
+| No backoff | ✅ Exponential backoff built-in |
+| Manual trigger | ✅ Workers automatically queue monitor karte hain |
+
+---
+
+## 🧠 Key Concepts
+
+**Worker aur API dono "workers" hain:**
+- API = **Producer worker** (jobs daalta hai)
+- Worker.js = **Consumer worker** (jobs process karta hai)
+
+**Queue mein kya rakho:**
+```
+❌ Video file itself       → too heavy
+✅ Video ID + S3 URL       → lightweight reference
+
+❌ Full user profile       → unnecessary
+✅ userId + task type      → enough for worker to fetch and process
+```
+
+**Multiple consumers:**
+```js
+// Agar load zyada ho to simply 2 workers chalao
+const worker1 = new Worker('emails', processJob, { connection })
+const worker2 = new Worker('emails', processJob, { connection })
+// BullMQ ensure karta hai same job do workers ko nahi milti
+```
+
+---
+
+## 📝 Quick Revision
+
+```
+BullMQ = Redis-backed production queue library
+
+q.js:
+  new Queue('name', { connection }) → queue banao
+
+worker.js:
+  new Worker('name', async(job) => { logic }, { connection })
+  worker.on('completed', cb)
+  worker.on('failed', cb)
+
+api.js:
+  queue.add('job-name', data, { attempts, backoff })
+
+Job data:
+  job.id    → unique ID
+  job.name  → job naam
+  job.data  → actual data jo tune diya tha
+
+Raw Redis vs BullMQ:
+  Raw   → job loss, no retry, manual trigger
+  BullMQ → protected, auto-retry, background processing
+```
+
+---
+
+*Next: Redis caching strategies — cache-aside, write-through, eviction policies! 🚀*
+
+# 🔴 Redis — Pub/Sub (Publish / Subscribe) (Hinglish)
+> *Chai aur Code series — Video 8: Redis Pub/Sub System*
+
+---
+
+## 🎯 Is Video Ka Goal
+
+Redis ka built-in **Pub/Sub system** samajhna aur implement karna — bina kisi third-party package ke.
+
+> 💡 **Interview mein puchha jaata hai:** "Build your own Pub/Sub with Redis." Yahi is video mein hai.
+
+---
+
+## 🔔 Notification ka Matlab — Broad Definition
+
+> Notification = sirf phone ki "ting" nahi!
+
+Software industry mein **notification = communication** hai:
+
+| Type | Example |
+|---|---|
+| Email | Welcome mail, OTP, invoice |
+| WhatsApp/SMS | Order update, alert |
+| In-app badge | Red circle mein "2" |
+| Top banner | Sale announcement |
+| DB field change | Status update visible to user |
+
+**Pub/Sub = in-app real-time notification ka ek tarika**
+
+---
+
+## 🏗️ Pub/Sub Architecture
+
+```
+PUBLISHER                  REDIS                    SUBSCRIBERS
+(API server)          [Channel: orders]         Sub A (active) ✅
+     |                [Channel: notifs]  →      Sub B (active) ✅
+     | publish()           |                    Sub C (inactive) ❌
+     └──────────────────→  |                         |
+                           |                    Message deliver
+                           |                    (only active ones)
+```
+
+**Key Rules:**
+- Publisher → channel pe message bhejta hai
+- Subscriber → channel ko listen karta hai
+- Inactive subscriber → message **miss** kar deta hai (no persistence)
+- Ek channel pe **multiple subscribers** ho sakte hain
+- Ek subscriber **multiple channels** subscribe kar sakta hai
+
+---
+
+## 📁 File Structure
+
+```
+src/
+├── subscriber.js   ← Channel sun'ta hai
+└── api.js          ← Publisher — message bhejta hai
+```
+
+---
+
+## 💻 `subscriber.js`
+
+```js
+import Redis from 'ioredis'
+
+// Subscriber = normal Redis client (sirf naam alag)
+const subscriber = new Redis(
+  process.env.REDIS_URL || 'redis://localhost:6379'
+)
+
+// Channel subscribe karo
+subscriber.subscribe('notifications', (err, count) => {
+  if (err) {
+    console.error('Subscribe failed:', err)
+    return
+  }
+  console.log(`Subscribed successfully to ${count} channel(s)`)
+})
+
+// Naya message aane pe
+subscriber.on('message', (channel, message) => {
+  // Message string format mein aata hai → JSON.parse karo
+  const parsed = JSON.parse(message)
+  console.log(`Received on [${channel}]:`, parsed)
+
+  // Yahan apna logic likho:
+  // - Email trigger karo
+  // - DB update karo
+  // - WebSocket se frontend ko bhejo
+})
+```
+
+---
+
+## 💻 `api.js` — Publisher
+
+```js
+import express from 'express'
+import Redis from 'ioredis'
+
+const app = express()
+app.use(express.json())
+
+// Publisher = normal Redis client (sirf naam alag)
+const publisher = new Redis(
+  process.env.REDIS_URL || 'redis://localhost:6379'
+)
+
+// POST /notifications — message publish karo
+app.post('/notifications', async (req, res) => {
+  const payload = {
+    title: req.body.title || 'Default Title',
+    body: req.body.body,
+    createdAt: new Date().toISOString()   // hamesha timestamp rakho
+  }
+
+  // Channel pe publish karo — JSON.stringify karna standard practice hai
+  await publisher.publish('notifications', JSON.stringify(payload))
+
+  res.json({ notificationSent: true })
+})
+
+app.listen(3000, () => console.log('Server: http://localhost:3000'))
+```
+
+---
+
+## 🔑 Pub/Sub Methods — Sirf 2
+
+| Method | Kaam | Kaun use karta hai |
+|---|---|---|
+| `redis.subscribe('channel', cb)` | Channel sun'na shuru karo | Subscriber |
+| `redis.publish('channel', message)` | Channel pe message bhejo | Publisher |
+
+---
+
+## 📡 Multiple Channels
+
+```js
+// Subscriber — multiple channels sun sakte ho
+subscriber.subscribe('notifications', 'orders', 'payments')
+
+// Publisher — alag-alag channels pe bhejo
+await publisher.publish('orders', JSON.stringify(orderData))
+await publisher.publish('notifications', JSON.stringify(notifData))
+```
+
+---
+
+## ⚠️ Pub/Sub vs Queue — Fark Samjho
+
+| Feature | Pub/Sub | Queue (BullMQ) |
+|---|---|---|
+| Persistence | ❌ Nahi — miss kiya to gone | ✅ Job tab tak hai jab tak process na ho |
+| Retry | ❌ Nahi | ✅ Auto retry |
+| Active subscribers | Required | Not required |
+| Use case | Real-time events | Background jobs |
+| Example | Live notifications | Email sending, video processing |
+
+> 💡 **Rule of thumb:**
+> - Real-time chahiye → **Pub/Sub**
+> - Guaranteed delivery chahiye → **Queue (BullMQ)**
+
+---
+
+## 🧠 Important — Message Format
+
+```js
+// Publish karte waqt — ALWAYS stringify karo
+await publisher.publish('channel', JSON.stringify(payload))
+
+// Receive karte waqt — ALWAYS parse karo
+subscriber.on('message', (channel, message) => {
+  const data = JSON.parse(message)   // string → object
+})
+```
+
+> Reason: Redis internally strings bhejta/leta hai. JSON.stringify/parse se sender aur receiver dono ko object milta hai.
+
+---
+
+## 📝 Quick Revision
+
+```
+Pub/Sub = Publisher + Channel + Subscriber
+
+Publisher:
+  redis.publish('channel-name', JSON.stringify(data))
+
+Subscriber:
+  redis.subscribe('channel-name', callback)
+  redis.on('message', (channel, message) => {
+    const data = JSON.parse(message)
+  })
+
+Channels → multiple ho sakte hain
+  'notifications', 'orders', 'payments'
+
+Inactive subscriber → message miss karta hai (no persistence)
+
+Pub/Sub vs Queue:
+  Real-time → Pub/Sub
+  Guaranteed → Queue
+```
+
+---
+
+## 🎯 Interview Question
+
+> **"Build your own Pub/Sub with Redis"**
+
+Answer:
+1. Ek Redis client banao — Publisher
+2. Doosra Redis client banao — Subscriber
+3. `subscriber.subscribe('channel-name')` call karo
+4. `subscriber.on('message', handler)` lagao
+5. Publisher se `publisher.publish('channel', JSON.stringify(data))` karo
+6. Done ✅
+
+---
+
+*Next: Redis caching strategies deep dive! 🚀*
+
+# 🔴 Redis — Live Leaderboard Assignment (Hinglish)
+> *Chai aur Code series — Video 9: Final Assignment*
+
+---
+
+## 🎯 Is Video Ka Goal
+
+Series ka **final assignment** — Live Leaderboard banana using Redis Sorted Sets.
+
+> 💡 Leaderboard Redis ka **showcase project** hai. Har Redis alternative apne homepage pe yahi example dikhata hai kyunki yeh Redis ki asli power demonstrate karta hai.
+
+---
+
+## 🏆 Live Leaderboard Kya Hota Hai?
+
+Real-time mein multiple users ke scores track karna — jab bhi koi score change ho, leaderboard turant update ho.
+
+**Examples:**
+- Cricket match live scores
+- Online game — 10 players ek saath khel rahe hain
+- Article views counter — konsa article sabse zyada viewed
+- Exam rankings
+
+**Problem with normal DB:**
+```
+User ka score update karna chahte ho:
+
+1. SELECT user WHERE id = X           ← DB read
+2. Calculate new score
+3. UPDATE user SET score = Y          ← DB write
+   (race condition: koi aur bhi update kar sakta hai!)
+4. SELECT * ORDER BY score LIMIT 10   ← leaderboard ke liye
+   (expensive query every time!)
+```
+
+**Redis se:**
+```
+redis.zincrby('leaderboard', points, userId)   ← ek command!
+redis.zrevrange('leaderboard', 0, 9)           ← top 10 instantly!
+```
+
+---
+
+## 🔑 4 Commands — Yaad Karo
+
+| Command | Kaam |
+|---|---|
+| `redis.incr(key)` | Ek counter increment karo (atomic) |
+| `redis.zincrby(key, increment, member)` | Sorted set mein member ka score badhao |
+| `redis.zrevrange(key, start, stop)` | Sorted set — high to low order mein range lo |
+| `redis.zrevrank(key, member)` | Kisi bhi member ki rank pata karo |
+
+> **Atomic** matlab: ek hi operation mein select + update ho jaata hai. Race condition possible hi nahi.
+
+---
+
+## 📌 API Endpoints — Banane Hain
+
+### 1. `POST /posts/:id/view`
+**Kaam:** Ek post ka view count increment karo
+
+```
+POST /posts/1/view
+→ View count of post 1 ++
+```
+
+Ye `incr` use karega. Yahan seekho ki Redis ek command mein kitna kuch karta hai jo DB mein multiple steps leta.
+
+---
+
+### 2. `POST /leaderboard/score`
+**Kaam:** Ek user ka score leaderboard mein add/update karo
+
+```
+POST /leaderboard/score
+Body: { "userId": "user_42", "points": 150 }
+→ user_42 ka score += 150
+```
+
+Ye `zincrby` use karega.
+
+---
+
+### 3. `GET /leaderboard`
+**Kaam:** Top 10 leaders laao
+
+```
+GET /leaderboard
+→ [
+    { userId: "user_5", score: 9800 },
+    { userId: "user_12", score: 8750 },
+    ...top 10
+  ]
+```
+
+Ye `zrevrange` use karega. **Koi query nahi, koi filter nahi, koi sort nahi** — sirf ek command.
+
+---
+
+### 4. `GET /leaderboard/:userId/rank`
+**Kaam:** Kisi bhi specific user ki rank instantly pata karo
+
+```
+GET /leaderboard/user_42/rank
+→ { userId: "user_42", rank: 7 }
+```
+
+Ye `zrevrank` use karega.
+
+---
+
+## 💻 Starter Code Structure
+
+```
+src/
+└── index.js
+```
+
+```js
+import express from 'express'
+import Redis from 'ioredis'
+
+const app = express()
+app.use(express.json())
+
+const redis = new Redis(
+  process.env.REDIS_URL || 'redis://localhost:6379'
+)
+
+const LEADERBOARD_KEY = 'leaderboard'
+
+// 1. POST /posts/:id/view — view count increment
+app.post('/posts/:id/view', async (req, res) => {
+  const postKey = `post:${req.params.id}:views`
+  const views = await redis.incr(postKey)   // atomic increment
+  res.json({ postId: req.params.id, views })
+})
+
+// 2. POST /leaderboard/score — score add karo
+app.post('/leaderboard/score', async (req, res) => {
+  const { userId, points } = req.body
+  const newScore = await redis.zincrby(LEADERBOARD_KEY, points, userId)
+  res.json({ userId, newScore: parseFloat(newScore) })
+})
+
+// 3. GET /leaderboard — top 10
+app.get('/leaderboard', async (req, res) => {
+  // zrevrange = high score first, 0 to 9 = top 10, WITHSCORES = score bhi do
+  const leaders = await redis.zrevrange(LEADERBOARD_KEY, 0, 9, 'WITHSCORES')
+
+  // leaders = ['userId1', '9800', 'userId2', '8750', ...]
+  // Isko pair mein convert karo
+  const formatted = []
+  for (let i = 0; i < leaders.length; i += 2) {
+    formatted.push({
+      rank: i / 2 + 1,
+      userId: leaders[i],
+      score: parseFloat(leaders[i + 1])
+    })
+  }
+
+  res.json({ leaderboard: formatted })
+})
+
+// 4. GET /leaderboard/:userId/rank — specific user ki rank
+app.get('/leaderboard/:userId/rank', async (req, res) => {
+  const { userId } = req.params
+  const rank = await redis.zrevrank(LEADERBOARD_KEY, userId)
+  // rank null aata hai agar user leaderboard mein hai hi nahi
+  res.json({ userId, rank: rank !== null ? rank + 1 : null })
+})
+
+app.listen(3000, () => console.log('Server: http://localhost:3000'))
+```
+
+---
+
+## ⚡ Redis Sorted Set — Kaise Kaam Karta Hai
+
+```
+LEADERBOARD_KEY = 'leaderboard'
+
+Internally ek sorted set maintain hoti hai:
+┌──────────────┬────────┐
+│ Member       │ Score  │
+├──────────────┼────────┤
+│ user_5       │ 9800   │
+│ user_12      │ 8750   │
+│ user_42      │ 4200   │
+│ user_7       │ 1500   │
+└──────────────┴────────┘
+
+Redis automatically sorted order maintain karta hai.
+Naya element add karo ya score update karo —
+Redis khud sort kar deta hai. Tumhe kuch nahi karna.
+```
+
+---
+
+## 🧪 API Testing Flow
+
+```
+# Kuch scores add karo
+POST /leaderboard/score  { "userId": "alice", "points": 500 }
+POST /leaderboard/score  { "userId": "bob",   "points": 800 }
+POST /leaderboard/score  { "userId": "alice", "points": 300 }  ← alice ka score 800 ho gaya
+
+# Top 10 dekho
+GET /leaderboard
+→ [{ rank:1, userId:"bob", score:800 }, { rank:2, userId:"alice", score:800 }]
+
+# Alice ki rank
+GET /leaderboard/alice/rank
+→ { userId: "alice", rank: 2 }
+
+# Post views
+POST /posts/1/view  → { views: 1 }
+POST /posts/1/view  → { views: 2 }
+POST /posts/1/view  → { views: 3 }
+```
+
+---
+
+## 🧠 `incr` ka Magic — Race Condition Nahi
+
+```
+Normal DB mein race condition:
+  Thread 1: read score = 100
+  Thread 2: read score = 100      ← same time pe padha
+  Thread 1: write score = 110
+  Thread 2: write score = 115     ← Thread 1 ka update lost! ❌
+
+Redis INCR/ZINCRBY:
+  Atomic operation — ek hi step mein read+write
+  Thread 1: incr → 110 ✅
+  Thread 2: incr → 120 ✅         ← koi data loss nahi
+```
+
+---
+
+## 📝 Quick Revision
+
+```
+4 Commands:
+  incr(key)                        → counter++  (atomic)
+  zincrby(key, points, userId)     → sorted set mein score badhao
+  zrevrange(key, 0, 9, 'WITHSCORES') → top 10 high-to-low
+  zrevrank(key, userId)            → user ki rank (0-indexed)
+
+Leaderboard Key = 'leaderboard'
+Post views Key  = 'post:{id}:views'
+
+Sorted Set:
+  Auto-sorted by score
+  zincrby = ek command mein select+update (no race condition)
+  zrevrange = instant top-N (no ORDER BY query needed)
+  zrevrank = instant rank (no COUNT query needed)
+```
+
+---
+
+## 🎯 Assignment Checklist
+
+- [ ] Docker compose up karo (Redis + MongoDB)
+- [ ] 4 endpoints banao
+- [ ] `incr`, `zincrby`, `zrevrange`, `zrevrank` — charo use karo
+- [ ] Multiple users ke scores add karo aur leaderboard test karo
+- [ ] Specific user ki rank verify karo
+- [ ] LinkedIn/Twitter pe post karo aur Piyush ko tag karo! 🚀
+
+---
+
+## 🏁 Series Complete — Summary
+
+| Video | Topic |
+|---|---|
+| 1 | Redis kya hai, use cases, key-value |
+| 2 | Docker setup, ioredis, ping-pong |
+| 3 | CRUD commands — set, get, del, exists |
+| 4 | TTL — OTP system |
+| 5 | JSON vs Hash — HSET/HGETALL |
+| 6 | Raw Queue — LPUSH/RPOP + drawbacks |
+| 7 | BullMQ — production queue |
+| 8 | Pub/Sub — real-time notifications |
+| 9 | Live Leaderboard assignment |
+
+---
+
+*Chai peete raho, mast raho! ☕🔴*
